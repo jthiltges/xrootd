@@ -41,6 +41,8 @@
 #include "Xrd/XrdBuffXL.hh"
 #include "Xrd/XrdTrace.hh"
 
+#define BUF_DIRECT_ALLOC
+
 /******************************************************************************/
 /*                     E x t e r n a l   L i n k a g e s                      */
 /******************************************************************************/
@@ -141,6 +143,26 @@ XrdBuffer *XrdBuffManager::Obtain(int sz)
 {
    XrdBuffer *bp;
    char *memp;
+
+#ifdef BUF_DIRECT_ALLOC
+// Allocate aligned memory
+//
+   if (!(memp = static_cast<char *>(valloc(sz)))) return 0;
+
+// Wrap the memory with a buffer object
+//
+   int bindex = 0;
+   if (!(bp = new XrdBuffer(memp, sz, bindex))) {free(memp); return 0;}
+
+// Update statistics
+//
+    Reshaper.Lock();
+    totbuf++;
+    totalo += sz;
+    totreq++;
+    Reshaper.UnLock();
+    return bp;
+#else
    int mk, pk, bindex;
 
 // Make sure the request is within our limits
@@ -186,6 +208,7 @@ XrdBuffer *XrdBuffManager::Obtain(int sz)
        {rsinprog = 1; Reshaper.Signal();}
     Reshaper.UnLock();
     return bp;
+#endif
 }
  
 /******************************************************************************/
@@ -194,6 +217,10 @@ XrdBuffer *XrdBuffManager::Obtain(int sz)
   
 int XrdBuffManager::Recalc(int sz)
 {
+#ifdef BUF_DIRECT_ALLOC
+   if (sz <= 0) return 0;
+   else         return sz;
+#else
    int mk, bindex;
 
 // Make sure the request is within our limits
@@ -212,6 +239,7 @@ int XrdBuffManager::Recalc(int sz)
 // All done, return the actual size we would have allocated
 //
    return mk;
+#endif
 }
 
 /******************************************************************************/
@@ -220,6 +248,14 @@ int XrdBuffManager::Recalc(int sz)
   
 void XrdBuffManager::Release(XrdBuffer *bp)
 {
+#ifdef BUF_DIRECT_ALLOC
+    Reshaper.Lock();
+    totbuf--;
+    totalo -= bp->bsize;
+    totadj++;
+    Reshaper.UnLock();
+    delete bp;
+#else
    int bindex = bp->bindex;
 
 // Check if we should release this via the big buffer object
@@ -233,6 +269,7 @@ void XrdBuffManager::Release(XrdBuffer *bp)
     bucket[bp->bindex].bnext = bp;
     bucket[bindex].numbuf++;
     Reshaper.UnLock();
+#endif
 }
  
 /******************************************************************************/
@@ -311,7 +348,11 @@ void XrdBuffManager::Set(int maxmem, int minw)
 // Obtain a lock and set the values
 //
    Reshaper.Lock();
+#ifdef BUF_DIRECT_ALLOC
+   maxalo = LLONG_MAX;
+#else
    if (maxmem > 0) maxalo = (long long)maxmem;
+#endif
    if (minw   > 0) minrsw = minw;
    Reshaper.UnLock();
 }
