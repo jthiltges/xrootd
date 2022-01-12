@@ -457,7 +457,7 @@ XrdCryptosslCipher::XrdCryptosslCipher(bool padded, int bits, char *pub,
                                        int lpub, const char *t)
 {
    // Constructor for key agreement.
-   // If pub is not defined, generates a DH full key,
+   // If pub is not defined, load dhparam file, or generate a DH full key,
    // the public part and parameters can be retrieved using Public().
    // The number of random bits to be used in 'bits'.
    // If pub is defined with the public part and parameters of the
@@ -474,7 +474,27 @@ XrdCryptosslCipher::XrdCryptosslCipher(bool padded, int bits, char *pub,
    cipher = 0;
    deflength = 1;
 
-   if (!pub) {
+   const char *dhparam = "/etc/xrootd/dhparam.pem";
+
+   if (!pub && dhparam) {
+      DEBUG("Loading dhparam");
+      BIO *dh_bio;
+      dh_bio = BIO_new_file(dhparam, "r");
+      if (dh_bio) {
+         fDH = PEM_read_bio_DHparams(dh_bio, NULL, NULL, NULL);
+         if (fDH) {
+            //
+            // Generate DH key
+            if (DH_generate_key(fDH)) {
+               // Init context
+               ctx = EVP_CIPHER_CTX_new();
+               if (ctx)
+                  valid = 1;
+            }
+         }
+         BIO_free(dh_bio);
+      }
+   } else if (!pub) {
       DEBUG("generate DH full key");
       //
       // at least 128 bits
