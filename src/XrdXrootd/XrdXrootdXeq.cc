@@ -2609,9 +2609,11 @@ int XrdXrootdProtocol::do_ReadV()
    rdVBreak = rdVecNum;
    rdVecNum++;
 
-// We limit the total size of the read to be 2GB for convenience
+// We limit the total size of the read to configured limits:
+//   (readv_ior_max * readv_iov_max) + header
+// Default: (2097136 * 1024) + 16384 = 2147483648
 //
-   if (totSZ > 0x7fffffffLL)
+   if (totSZ > ((long long)maxReadv_ior * XrdProto::maxRvecsz) + rdVecLen)
       return Response.Send(kXR_NoMemory, "Total readv transfer is too large");
 
 // Calculate the transfer unit which will be the smaller of the maximum
